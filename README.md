@@ -229,6 +229,7 @@ Each stage can be updated during QR scanning.
 * Surapaneni Aasritha Sri Varshini
 * Ravipati Vishnu Tejaswini
 * Jeevani Yalamanchilli
+* Maramganty Mayukha
 
 ---
 
