@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Print All QR Codes – QRTrack</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --accent: #00d4ff;
+    --muted:  #64748b;
+    --mono:   'Space Mono', monospace;
+    --sans:   'DM Sans', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: var(--sans);
+    background: #f8fafc;
+    color: #1e293b;
+    padding: 20px;
+  }
+
+  /* ── Screen-only toolbar ── */
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+    padding: 16px 20px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .toolbar h1 {
+    font-family: var(--mono);
+    font-size: 15px;
+    color: #0f172a;
+    letter-spacing: .04em;
+    flex: 1;
+  }
+  .toolbar .meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .btn-print {
+    padding: 9px 20px;
+    background: #0f172a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--sans);
+    letter-spacing: .02em;
+    transition: opacity .15s;
+  }
+  .btn-print:hover { opacity: .85; }
+  .btn-back {
+    padding: 9px 16px;
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    font-family: var(--sans);
+  }
+  .btn-back:hover { border-color: #94a3b8; color: #1e293b; }
+
+  /* ── QR grid ── */
+  .qr-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+  }
+
+  .qr-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 14px;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .qr-img-wrap {
+    background: #fff;
+    border: 1px solid #f1f5f9;
+    border-radius: 6px;
+    padding: 8px;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  .qr-img-wrap img {
+    width: 140px;
+    height: 140px;
+    display: block;
+  }
+
+  .qr-file-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: .04em;
+    margin-bottom: 3px;
+    word-break: break-all;
+  }
+  .qr-dept {
+    font-size: 10px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .qr-name {
+    font-size: 10px;
+    color: #475569;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── Cut guides (print only) ── */
+  .qr-card::after {
+    content: '';
+    display: block;
+    margin-top: 10px;
+    border-top: 1px dashed #cbd5e1;
+  }
+
+  /* ── Empty state ── */
+  .empty {
+    text-align: center;
+    padding: 80px 20px;
+    color: var(--muted);
+  }
+  .empty .icon { font-size: 56px; margin-bottom: 16px; }
+  .empty p { font-size: 15px; }
+
+  /* ── Print styles ── */
+  @media print {
+    @page { margin: 12mm; size: A4; }
+
+    body { background: #fff !important; padding: 0; }
+
+    .toolbar { display: none !important; }
+
+    .qr-grid {
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .qr-card {
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      padding: 10px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .qr-img-wrap img { width: 120px; height: 120px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Screen toolbar -->
+<div class="toolbar">
+  <h1>🖨️ PRINT ALL QR CODES</h1>
+  <span class="meta">{{ files|length }} file(s) with QR codes</span>
+  <a href="/files" class="btn-back">← Back</a>
+  <button class="btn-print" onclick="window.print()">🖨️ Print / Save PDF</button>
+</div>
+
+{% if files %}
+<div class="qr-grid">
+  {% for f in files %}
+  <div class="qr-card">
+    <div class="qr-img-wrap">
+      <img src="{{ f.qr_base64 }}" alt="QR {{ f.file_id }}">
+    </div>
+    <div class="qr-file-id">{{ f.file_id }}</div>
+    <div class="qr-dept">{{ f.department }}</div>
+    {% if f.file_name %}
+    <div class="qr-name" title="{{ f.file_name }}">{{ f.file_name }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  <div class="icon">📭</div>
+  <p>No QR codes found. Create some files first!</p>
+</div>
+{% endif %}
+
+<script>
+  // Auto-open the print dialog on page load
+  window.addEventListener('load', function() {
+    // Short delay so images are rendered before print dialog
+    setTimeout(function() { window.print(); }, 600);
+  });
+</script>
+
+</body>
+</html>

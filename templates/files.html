@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block title %}All Files – QRTrack{% endblock %}
+{% block page_title %}All Files{% endblock %}
+{% block page_sub %}<span style="font-size:12px;color:var(--muted)">Browse files organised by department</span>{% endblock %}
+
+{% block extra_css %}
+<style>
+.filter-bar { display:flex; gap:12px; margin-bottom:20px; align-items:center; flex-wrap:wrap; }
+.search-box { flex:1; min-width:200px; }
+
+/* Folder / accordion */
+.dept-folder {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.dept-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+.dept-header:hover { background: var(--surface2); }
+.dept-header-left { display:flex; align-items:center; gap:12px; }
+.dept-icon {
+  font-size: 20px;
+  width: 36px; height: 36px;
+  background: var(--surface2);
+  border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+.dept-name { font-weight: 600; font-size: 14px; }
+.dept-meta { font-size: 11px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
+.dept-chevron { font-size: 12px; color: var(--muted); transition: transform 0.2s; }
+.dept-folder.open .dept-chevron { transform: rotate(90deg); }
+
+.dept-body { display: none; border-top: 1px solid var(--border); }
+.dept-folder.open .dept-body { display: block; }
+
+.file-row {
+  display: flex;
+  align-items: center;
+  padding: 11px 20px;
+  border-bottom: 1px solid rgba(31,48,68,0.4);
+  gap: 12px;
+  transition: background 0.1s;
+}
+.file-row:last-child { border-bottom: none; }
+.file-row:hover { background: var(--surface2); }
+.file-row-id {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  min-width: 130px;
+  flex-shrink: 0;
+}
+.file-row-name { flex: 1; font-size: 13px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-row-meta { display:flex; gap:8px; align-items:center; flex-shrink:0; }
+.file-row-actions { display:flex; gap:6px; flex-shrink:0; }
+
+/* checkout indicator */
+.checkout-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  background: rgba(245,158,11,0.15); color: var(--amber);
+}
+.available-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600;
+  background: rgba(16,185,129,0.12); color: var(--green);
+}
+
+/* search highlight / hide */
+.file-row.hidden { display: none; }
+.dept-folder.all-hidden { opacity: 0.4; }
+
+@media (max-width: 700px) {
+  .file-row-meta, .file-row-actions { display: none; }
+  .file-row-name { flex: 1; }
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="filter-bar">
+  <div class="search-box">
+    <input type="text" id="search-input" placeholder="🔍 Search by file ID, name…" oninput="filterFiles()" style="width:100%">
+  </div>
+  <select id="filter-priority" onchange="filterFiles()" style="width:160px">
+    <option value="">All Priorities</option>
+    <option value="urgent">Urgent</option>
+    <option value="high">High</option>
+    <option value="normal">Normal</option>
+    <option value="confidential">Confidential</option>
+  </select>
+  <select id="filter-status" onchange="filterFiles()" style="width:150px">
+    <option value="">All Statuses</option>
+    <option value="out">Checked Out</option>
+    <option value="in">Available</option>
+  </select>
+  {% if session.role != 'viewer' %}
+  <a href="/create" class="btn btn-primary btn-sm">➕ New File</a>
+  {% endif %}
+</div>
+
+{% if not dept_groups %}
+<div class="card" style="text-align:center;padding:60px;color:var(--muted)">
+  <div style="font-size:48px">📭</div>
+  <div style="margin-top:12px;font-size:14px">No files registered yet.
+    {% if session.role != 'viewer' %}<a href="/create" style="color:var(--accent)">Create one!</a>{% endif %}
+  </div>
+</div>
+{% endif %}
+
+{% set dept_icons = {
+  'Administration': '🏛️',
+  'Computer Science': '💻',
+  'Mechanical Engineering': '⚙️',
+  'Electrical Engineering': '⚡',
+  'Civil Engineering': '🏗️',
+  'Physics': '🔬',
+  'Mathematics': '📐',
+  'Hostel Office': '🏠',
+  'Library': '📚',
+  'Finance': '💰',
+  'Student Affairs': '🎓',
+  'Research': '🔭'
+} %}
+
+<div id="folders-container">
+{% for dept, dept_files in dept_groups.items() %}
+{% set out_count = dept_files | selectattr('is_checked_out') | list | length %}
+<div class="dept-folder" id="folder-{{ loop.index }}"
+     data-dept="{{ dept | lower }}">
+  <div class="dept-header" onclick="toggleFolder('folder-{{ loop.index }}')">
+    <div class="dept-header-left">
+      <div class="dept-icon">{{ dept_icons.get(dept, '📁') }}</div>
+      <div>
+        <div class="dept-name">{{ dept }}</div>
+        <div class="dept-meta">{{ dept_files|length }} file(s) &nbsp;·&nbsp; {{ out_count }} checked out</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      {% if out_count > 0 %}
+        <span class="checkout-badge">↗ {{ out_count }} out</span>
+      {% endif %}
+      <span class="dept-chevron">▶</span>
+    </div>
+  </div>
+  <div class="dept-body">
+    {% for f in dept_files %}
+    {% set pr = f.get('priority','normal') %}
+    <div class="file-row"
+         data-search="{{ f.get('file_id','') | lower }} {{ f.get('file_name','') | lower }}"
+         data-priority="{{ pr }}"
+         data-status="{{ 'out' if f.is_checked_out else 'in' }}">
+      <div class="file-row-id">{{ f.get('file_id','—') }}</div>
+      <div class="file-row-name" title="{{ f.get('file_name','') }}">{{ f.get('file_name','—') }}</div>
+      <div class="file-row-meta">
+        {% if pr == 'urgent' %}      <span class="badge badge-red">🔴 Urgent</span>
+        {% elif pr == 'high' %}      <span class="badge badge-amber">🟡 High</span>
+        {% elif pr == 'confidential' %}<span class="badge badge-purple">🔒 Conf.</span>
+        {% else %}                   <span class="badge badge-blue">Normal</span>
+        {% endif %}
+        {% if f.is_checked_out %}
+          <span class="checkout-badge">↗ Out</span>
+        {% else %}
+          <span class="available-badge">✓ In</span>
+        {% endif %}
+        {% set act = f.get('action') %}
+        {% if act == 'checkin' %}    <span style="font-size:11px;color:var(--muted)">by {{ f.get('person','') }}</span>
+        {% elif act == 'checkout' %} <span style="font-size:11px;color:var(--muted)">by {{ f.get('person','') }}</span>
+        {% endif %}
+      </div>
+      <div class="file-row-actions">
+        <a href="/file/{{ f.file_id }}/parts" class="btn btn-secondary btn-sm">📎</a>
+        <a href="/history" onclick="sessionStorage.setItem('hid','{{ f.file_id }}')" class="btn btn-secondary btn-sm">🕐</a>
+        {% if session.role != 'viewer' %}
+        <a href="/scan" class="btn btn-secondary btn-sm">📷</a>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+</div>
+
+<div id="no-results" style="display:none;text-align:center;padding:40px;color:var(--muted)">
+  No files match your search.
+</div>
+
+<script>
+function toggleFolder(id) {
+  const el = document.getElementById(id);
+  el.classList.toggle('open');
+}
+
+// Expand all folders that contain matches during search
+function filterFiles() {
+  const q     = document.getElementById('search-input').value.toLowerCase().trim();
+  const pr    = document.getElementById('filter-priority').value;
+  const st    = document.getElementById('filter-status').value;
+
+  let totalVisible = 0;
+
+  document.querySelectorAll('.dept-folder').forEach(folder => {
+    const rows   = folder.querySelectorAll('.file-row');
+    let folderVis = 0;
+
+    rows.forEach(row => {
+      const txt   = (row.dataset.search  || '');
+      const prio  = (row.dataset.priority || '');
+      const stat  = (row.dataset.status  || '');
+      const show  = (!q  || txt.includes(q)) &&
+                    (!pr || prio === pr) &&
+                    (!st || stat === st);
+      row.classList.toggle('hidden', !show);
+      if (show) folderVis++;
+    });
+
+    totalVisible += folderVis;
+    folder.classList.toggle('all-hidden', folderVis === 0);
+
+    // Auto-expand when searching
+    if (q || pr || st) {
+      if (folderVis > 0) folder.classList.add('open');
+      else               folder.classList.remove('open');
+    }
+  });
+
+  document.getElementById('no-results').style.display = (totalVisible === 0) ? 'block' : 'none';
+}
+</script>
+{% endblock %}

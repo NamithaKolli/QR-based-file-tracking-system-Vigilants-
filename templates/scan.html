@@ -1,0 +1,370 @@
+{% extends "base.html" %}
+{% block title %}Scan QR – QRTrack{% endblock %}
+{% block page_title %}Scan QR Code{% endblock %}
+{% block page_sub %}<span style="font-size:12px;color:var(--muted)">Check in, check out, or transfer a file</span>{% endblock %}
+
+{% block extra_css %}
+<style>
+  .scan-area { border:2px dashed var(--border); border-radius:12px; overflow:hidden; position:relative; }
+  #reader { width:100% !important; }
+  #reader video { border-radius:0 !important; }
+
+  .file-preview { background:var(--surface2); border:1px solid var(--border); border-radius:10px; padding:16px; display:none; }
+  .file-preview.visible { display:block; }
+  .file-preview-label { font-family:var(--mono); font-size:10px; color:var(--muted); letter-spacing:0.08em; margin-bottom:4px; }
+  .file-preview-val   { font-size:14px; font-weight:600; }
+
+  .action-btns { display:flex; gap:10px; flex-wrap:wrap; }
+  .action-btn {
+    flex:1; padding:14px; border-radius:10px; border:2px solid transparent;
+    cursor:pointer; font-size:14px; font-weight:600; font-family:var(--sans);
+    transition:all 0.15s; text-align:center; background:var(--surface2); color:var(--muted);
+  }
+  .action-btn:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .action-btn:disabled { opacity:0.35; cursor:not-allowed; }
+  .action-btn.selected-checkin  { background:rgba(16,185,129,0.1);  border-color:var(--green);  color:var(--green);  }
+  .action-btn.selected-checkout { background:rgba(245,158,11,0.1);  border-color:var(--amber);  color:var(--amber);  }
+  .action-btn.selected-transfer { background:rgba(0,212,255,0.1);   border-color:var(--accent); color:var(--accent); }
+
+  #transfer-dept    { display:none; }
+  #due-date-field   { display:none; }
+  #receiver-field   { display:none; }
+
+  .checkout-warning {
+    display:none; background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3);
+    color:var(--red); padding:10px 14px; border-radius:8px; font-size:13px; margin-bottom:12px;
+  }
+  .checkout-warning.visible { display:block; }
+
+  /* receiver field highlight */
+  #receiver-field {
+    background: rgba(0,212,255,0.05);
+    border: 1px solid rgba(0,212,255,0.2);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+  #receiver-field label {
+    color: var(--accent) !important;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if session.role == 'viewer' %}
+<div class="card" style="text-align:center;padding:60px;color:var(--muted)">
+  <div style="font-size:48px">🔒</div>
+  <div style="font-size:16px;margin-top:12px;color:var(--red)">Read-Only Access</div>
+  <div style="font-size:13px;margin-top:6px">Viewers cannot scan or modify files.</div>
+  <a href="/history" class="btn btn-secondary" style="margin-top:20px">🕐 View History Instead</a>
+</div>
+{% else %}
+
+<div class="grid-2">
+
+  <!-- LEFT: scanner + form -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">📷 QR Scanner</div>
+      <div class="card-sub">Point camera at file QR code, or type File ID manually</div>
+    </div>
+
+    <div class="scan-area" style="margin-bottom:16px"><div id="reader"></div></div>
+
+    <button onclick="toggleCamera()" id="cam-btn" class="btn btn-secondary" style="width:100%;margin-bottom:20px">
+      📷 Start Camera Scanner
+    </button>
+
+    <!-- Already-checked-out warning -->
+    <div class="checkout-warning" id="checkout-warning">
+      ⚠️ This file is already <strong>checked out</strong>. It must be checked back in before another checkout.
+    </div>
+
+    <!-- File preview card -->
+    <div class="file-preview" id="file-preview">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div><div class="file-preview-label">FILE ID</div>    <div class="file-preview-val" id="preview-id">—</div></div>
+        <div><div class="file-preview-label">FILE NAME</div>  <div class="file-preview-val" id="preview-name">—</div></div>
+        <div><div class="file-preview-label">DEPARTMENT</div> <div class="file-preview-val" id="preview-dept">—</div></div>
+        <div><div class="file-preview-label">LAST HANDLER</div><div class="file-preview-val" id="preview-person">—</div></div>
+        <div><div class="file-preview-label">STATUS</div>     <div class="file-preview-val" id="preview-status">—</div></div>
+      </div>
+    </div>
+
+    <form method="POST" id="scan-form" style="margin-top:20px">
+
+      <!-- File ID -->
+      <div class="form-group">
+        <label>FILE ID (manual entry)</label>
+        <input type="text" name="file_id" id="file_id_input"
+               placeholder="e.g. CSE-2024-001"
+               style="font-family:var(--mono);text-transform:uppercase"
+               oninput="lookupFile(this.value)">
+      </div>
+
+      <!-- Action buttons -->
+      <div class="form-group">
+        <label>ACTION</label>
+        <div class="action-btns">
+          <button type="button" class="action-btn" id="btn-checkin"
+                  onclick="selectAction('checkin',this)">↙ Check In</button>
+          <button type="button" class="action-btn" id="btn-checkout"
+                  onclick="selectAction('checkout',this)">↗ Check Out</button>
+          <button type="button" class="action-btn" id="btn-transfer"
+                  onclick="selectAction('transfer',this)">⇄ Transfer</button>
+        </div>
+        <input type="hidden" name="action" id="action-input">
+      </div>
+
+      <!-- ── RECEIVED BY (shown for checkout, transfer, checkin) ── -->
+      <div class="form-group" id="receiver-field">
+        <label>👤 RECEIVED BY</label>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+          Who is physically receiving / taking this file?
+        </div>
+        <!-- Text input (shown when no users loaded) -->
+        <input type="text" name="receiver" id="receiver-input"
+               placeholder="Type receiver's full name…"
+               style="margin-bottom:8px">
+        <!-- Quick-select from registered users -->
+        <div id="user-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px"></div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">
+          ↑ Click a name to fill quickly, or type manually above
+        </div>
+      </div>
+
+      <!-- Stage -->
+      <div class="form-group">
+        <label>FILE STAGE</label>
+        <select name="stage" required>
+          <option value="created">Created</option>
+          <option value="review">Review</option>
+          <option value="approved">Approved</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+
+      <!-- Transfer department -->
+      <div class="form-group" id="transfer-dept">
+        <label>TRANSFER TO DEPARTMENT</label>
+        <select name="new_department">
+          <option value="">Select destination</option>
+          {% for dept in departments %}
+          <option>{{ dept }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Notes -->
+      <div class="form-group">
+        <label>NOTES (optional)</label>
+        <input type="text" name="notes" placeholder="Reason, remarks, urgency...">
+      </div>
+
+      <!-- Due date (checkout only) -->
+      <div class="form-group" id="due-date-field">
+        <label>DUE DATE (for checkout)</label>
+        <input type="date" name="due_date"
+          style="width:100%;padding:10px 14px;background:var(--bg);border:1px solid var(--border);
+          border-radius:8px;color:var(--text);font-family:var(--mono);font-size:14px;
+          outline:none;color-scheme:dark;">
+      </div>
+
+      <button type="submit" id="submit-btn" class="btn btn-primary" style="width:100%" disabled>
+        Submit Action →
+      </button>
+    </form>
+  </div>
+
+  <!-- RIGHT: guide + recent scans -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:16px">Action Guide</div>
+      <div style="display:flex;flex-direction:column;gap:14px;font-size:13px">
+
+        <div style="padding:12px;background:rgba(16,185,129,0.07);border:1px solid rgba(16,185,129,0.2);border-radius:8px">
+          <div style="color:var(--green);font-weight:600;margin-bottom:4px">↙ Check In</div>
+          <div style="color:var(--muted)">File is returned / received back. Enter the name of the person receiving it.</div>
+        </div>
+
+        <div style="padding:12px;background:rgba(245,158,11,0.07);border:1px solid rgba(245,158,11,0.2);border-radius:8px">
+          <div style="color:var(--amber);font-weight:600;margin-bottom:4px">↗ Check Out</div>
+          <div style="color:var(--muted)">
+            Someone is taking the file out. Enter <strong>who is receiving it</strong> in the
+            <em>Received By</em> field. Only allowed when the file is currently checked in.
+          </div>
+        </div>
+
+        <div style="padding:12px;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.2);border-radius:8px">
+          <div style="color:var(--accent);font-weight:600;margin-bottom:4px">⇄ Transfer</div>
+          <div style="color:var(--muted)">Move the file permanently to another department. Enter who receives it.</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">Recent Scans</div>
+      <div id="recent-scans" style="font-size:12px;color:var(--muted)">No scans in this session yet.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+let scanner = null, scannerRunning = false, recentScans = [];
+let currentFileCheckedOut = false;
+let allUsers = [];
+
+// ── Load registered users for quick-select chips ──
+fetch('/api/users')
+  .then(r => r.json())
+  .then(data => {
+    allUsers = data.users || [];
+    renderChips();
+  })
+  .catch(() => {}); // silently fail — manual input still works
+
+function renderChips() {
+  const container = document.getElementById('user-chips');
+  if (!container) return;
+  container.innerHTML = allUsers.map(u => `
+    <button type="button"
+      onclick="setReceiver('${u.full_name.replace(/'/g, "\\'")}')"
+      style="padding:4px 12px;border-radius:20px;border:1px solid var(--border);
+             background:var(--surface2);color:var(--text);font-size:12px;
+             cursor:pointer;font-family:var(--sans);transition:all 0.12s"
+      onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+      onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text)'">
+      ${u.full_name}
+    </button>`).join('');
+}
+
+function setReceiver(name) {
+  const inp = document.getElementById('receiver-input');
+  if (inp) {
+    inp.value = name;
+    // Highlight briefly
+    inp.style.borderColor = 'var(--accent)';
+    setTimeout(() => inp.style.borderColor = '', 800);
+  }
+}
+
+// ── Camera ──
+function toggleCamera() {
+  const btn = document.getElementById('cam-btn');
+  if (!scannerRunning) {
+    scanner = new Html5Qrcode("reader");
+    scanner.start(
+      { facingMode: "environment" },
+      { fps: 10, qrbox: { width: 250, height: 250 } },
+      (decodedText) => {
+        document.getElementById('file_id_input').value = decodedText;
+        lookupFile(decodedText);
+        scanner.stop(); scannerRunning = false;
+        btn.textContent = '📷 Start Camera Scanner';
+        addRecentScan(decodedText);
+      }
+    ).then(() => { scannerRunning = true; btn.textContent = '⏹ Stop Scanner'; });
+  } else {
+    scanner.stop(); scannerRunning = false;
+    btn.textContent = '📷 Start Camera Scanner';
+  }
+}
+
+// ── File lookup ──
+let lookupTimeout;
+function lookupFile(val) {
+  clearTimeout(lookupTimeout);
+  if (!val || val.length < 3) return;
+  lookupTimeout = setTimeout(() => {
+    fetch('/fileinfo/' + val.trim().toUpperCase())
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) {
+          document.getElementById('file-preview').classList.remove('visible');
+          document.getElementById('checkout-warning').classList.remove('visible');
+          currentFileCheckedOut = false;
+          refreshCheckoutBtn();
+          return;
+        }
+        currentFileCheckedOut = !!data.is_checked_out;
+
+        document.getElementById('preview-id').textContent      = val.toUpperCase();
+        document.getElementById('preview-name').textContent    = data.file_name;
+        document.getElementById('preview-dept').textContent    = data.department;
+        document.getElementById('preview-person').textContent  = data.last_receiver || data.person;
+        document.getElementById('preview-status').innerHTML    = currentFileCheckedOut
+          ? '<span style="color:var(--amber)">↗ Checked Out — by ' + (data.person||'') + '</span>'
+          : '<span style="color:var(--green)">✓ Available</span>';
+
+        document.getElementById('file-preview').classList.add('visible');
+        refreshCheckoutBtn();
+        checkSubmit();
+      });
+  }, 400);
+}
+
+// ── Checkout button state ──
+function refreshCheckoutBtn() {
+  const btn  = document.getElementById('btn-checkout');
+  const warn = document.getElementById('checkout-warning');
+  if (currentFileCheckedOut) {
+    btn.disabled = true;
+    warn.classList.add('visible');
+    if (document.getElementById('action-input').value === 'checkout') {
+      document.querySelectorAll('.action-btn').forEach(b => b.className = 'action-btn');
+      document.getElementById('action-input').value = '';
+      document.getElementById('due-date-field').style.display   = 'none';
+      document.getElementById('receiver-field').style.display   = 'none';
+      checkSubmit();
+    }
+  } else {
+    btn.disabled = false;
+    warn.classList.remove('visible');
+  }
+}
+
+// ── Action selection ──
+function selectAction(action, el) {
+  if (action === 'checkout' && currentFileCheckedOut) return;
+
+  document.querySelectorAll('.action-btn').forEach(b => b.className = 'action-btn');
+  el.className = `action-btn selected-${action}`;
+  document.getElementById('action-input').value = action;
+
+  // Show/hide contextual fields
+  document.getElementById('transfer-dept').style.display  = action === 'transfer' ? 'block' : 'none';
+  document.getElementById('due-date-field').style.display = action === 'checkout'  ? 'block' : 'none';
+
+  // Show "Received By" for checkout and transfer; hide for checkin
+  // (checkin = person scanning IS the receiver, no need to ask)
+  document.getElementById('receiver-field').style.display =
+    (action === 'checkout' || action === 'transfer') ? 'block' : 'none';
+
+  // Clear receiver on action change
+  document.getElementById('receiver-input').value = '';
+
+  checkSubmit();
+}
+
+// ── Submit gate ──
+function checkSubmit() {
+  const hasId     = document.getElementById('file_id_input').value.trim().length > 0;
+  const hasAction = document.getElementById('action-input').value.trim().length > 0;
+  document.getElementById('submit-btn').disabled = !(hasId && hasAction);
+}
+
+// ── Recent scans ──
+function addRecentScan(id) {
+  recentScans.unshift({ id, time: new Date().toLocaleTimeString() });
+  if (recentScans.length > 5) recentScans.pop();
+  document.getElementById('recent-scans').innerHTML = recentScans.map(s => `
+    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span style="font-family:var(--mono);color:var(--text)">${s.id}</span>
+      <span>${s.time}</span>
+    </div>`).join('');
+}
+</script>
+{% endif %}
+{% endblock %}

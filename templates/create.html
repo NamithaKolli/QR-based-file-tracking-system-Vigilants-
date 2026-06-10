@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}Create File – QRTrack{% endblock %}
+{% block page_title %}Create New File{% endblock %}
+{% block page_sub %}<span style="font-size:12px;color:var(--muted)">Register a file and generate its QR code</span>{% endblock %}
+
+{% block extra_css %}
+<style>
+.part-row {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  position: relative;
+}
+.part-row .remove-part {
+  position: absolute;
+  top: 10px; right: 12px;
+  background: none;
+  border: none;
+  color: var(--red);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+}
+.part-row .remove-part:hover { opacity: 0.7; }
+.parts-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 13px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin-bottom: 0;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if session.role == 'viewer' %}
+<div class="card" style="text-align:center;padding:60px;color:var(--muted)">
+  <div style="font-size:48px">🔒</div>
+  <div style="font-size:16px;margin-top:12px;color:var(--red)">Read-Only Access</div>
+  <div style="font-size:13px;margin-top:6px">Viewers cannot create files. Please contact an admin.</div>
+</div>
+{% else %}
+
+<div class="grid-2">
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header">
+        <div class="card-title">File Details</div>
+        <div class="card-sub">Fields marked * are required</div>
+      </div>
+      <form method="POST" id="create-form">
+        <div class="form-group">
+          <label>FILE ID *</label>
+          <input type="text" name="file_id" placeholder="e.g. CSE-2024-001" required
+                 style="font-family:var(--mono)" oninput="this.value=this.value.toUpperCase()">
+        </div>
+        <div class="form-group">
+          <label>FILE NAME / TITLE *</label>
+          <input type="text" name="file_name" placeholder="e.g. Lab Equipment Purchase Request" required>
+        </div>
+        <div class="form-group">
+          <label>DEPARTMENT *</label>
+          <select name="department" id="dept-select" required onchange="updatePartTypes()">
+            <option value="">Select Department</option>
+            {% for dept in departments %}
+            <option>{{ dept }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="form-group">
+          <label>PRIORITY</label>
+          <select name="priority">
+            <option value="normal">Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+            <option value="confidential">Confidential</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>DESCRIPTION (optional)</label>
+          <textarea name="description" rows="3"
+                    placeholder="Brief description of the file content..."
+                    style="resize:vertical"></textarea>
+        </div>
+
+        <!-- ── File Parts Section ── -->
+        <div style="border-top:1px solid var(--border);margin:20px 0 16px;padding-top:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <div style="font-size:14px;font-weight:600">File Parts
+                <span style="font-size:11px;color:var(--muted);font-weight:400">(optional)</span>
+              </div>
+              <div style="font-size:11px;color:var(--muted);margin-top:2px">
+                Attach invoices, reports, letters, etc. at creation time
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addPartRow()">+ Add Part</button>
+          </div>
+          <div id="parts-container">
+            <div class="parts-empty" id="parts-empty">
+              No parts added yet. Click "+ Add Part" to attach sub-documents.
+            </div>
+          </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width:100%">Generate QR Code →</button>
+      </form>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:20px">
+    {% if qr_b64 %}
+    <div class="card" style="text-align:center">
+      <div class="card-title" style="margin-bottom:4px">✅ QR Code Generated</div>
+      <div class="card-sub" style="margin-bottom:20px">
+        Print and attach this to file <strong>{{ file_id }}</strong>
+      </div>
+      <div style="background:#fff;display:inline-block;padding:16px;border-radius:12px">
+        <img src="{{ qr_b64 }}" alt="QR Code" style="width:180px;height:180px;display:block">
+      </div>
+      <div style="margin-top:16px;font-family:var(--mono);font-size:13px;color:var(--accent)">
+        {{ file_id }}
+      </div>
+      <div style="margin-top:4px;font-size:12px;color:var(--muted)">{{ file_name }}</div>
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+        <a href="{{ qr_b64 }}" download="{{ file_id }}.png" class="btn btn-primary btn-sm">⬇ Download QR</a>
+        <a href="/file/{{ file_id }}/parts" class="btn btn-secondary btn-sm">📎 View Parts</a>
+        <a href="/print_all_qr" class="btn btn-secondary btn-sm">🖨️ Print All QRs</a>
+        <a href="/create" class="btn btn-secondary btn-sm">+ New File</a>
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">How It Works</div>
+      <div style="display:flex;flex-direction:column;gap:14px">
+        {% for step, icon, desc in [
+          ('1', '📝', 'Fill in the file details on the left'),
+          ('2', '📎', 'Optionally add sub-parts (invoices, reports…)'),
+          ('3', '🖨️', 'Download and print the generated QR code'),
+          ('4', '📷', 'Scan whenever the file moves between departments')
+        ] %}
+        <div style="display:flex;align-items:flex-start;gap:14px">
+          <div style="min-width:32px;height:32px;background:var(--surface2);border-radius:50%;
+                      display:flex;align-items:center;justify-content:center;
+                      font-family:var(--mono);font-size:13px;color:var(--accent)">{{ step }}</div>
+          <div>
+            <div style="font-size:18px">{{ icon }}</div>
+            <div style="font-size:13px;color:var(--muted);margin-top:2px">{{ desc }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">Priority Guide</div>
+      <div style="display:flex;flex-direction:column;gap:8px;font-size:12px">
+        <div><span class="badge badge-blue">Normal</span> &nbsp; Regular departmental files</div>
+        <div><span class="badge badge-amber">High</span> &nbsp; Time-sensitive documents</div>
+        <div><span class="badge badge-red">Urgent</span> &nbsp; Immediate action required</div>
+        <div><span class="badge badge-purple">Confidential</span> &nbsp; Restricted access</div>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endif %}
+
+<script>
+/* dept_parts comes from Flask as a Python dict → JSON object */
+const DEPT_PARTS = {{ dept_parts | tojson }};
+const FALLBACK = [
+  'Official Memo','Approval Letter','Application Form','Project Report',
+  'Payment Receipt','Purchase Invoice','Quotation','NOC','Other'
+];
+let partCount = 0;
+
+function getPartOptions(dept) {
+  const list = DEPT_PARTS[dept] || FALLBACK;
+  return '<option value="">Select type</option>' +
+         list.map(o => `<option value="${o}">${o}</option>`).join('');
+}
+
+function updatePartTypes() {
+  const dept = document.getElementById('dept-select').value;
+  document.querySelectorAll('.part-type-select').forEach(sel => {
+    const cur = sel.value;
+    sel.innerHTML = getPartOptions(dept);
+    if (cur) sel.value = cur;
+  });
+}
+
+function addPartRow() {
+  const dept  = document.getElementById('dept-select').value;
+  const id    = ++partCount;
+  const empty = document.getElementById('parts-empty');
+  if (empty) empty.style.display = 'none';
+
+  const div = document.createElement('div');
+  div.className = 'part-row';
+  div.id = `part-row-${id}`;
+  div.innerHTML = `
+    <button type="button" class="remove-part" onclick="removePartRow(${id})" title="Remove">✕</button>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="form-group" style="margin-bottom:0">
+        <label>PART TYPE</label>
+        <select name="part_type[]" class="part-type-select">
+          ${getPartOptions(dept)}
+        </select>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label>TITLE</label>
+        <input type="text" name="part_title[]" placeholder="e.g. Lab Equipment Invoice">
+      </div>
+    </div>
+    <div class="form-group" style="margin-bottom:0">
+      <label>DESCRIPTION (optional)</label>
+      <input type="text" name="part_desc[]"
+             placeholder="Details, amounts, reference numbers...">
+    </div>
+  `;
+  document.getElementById('parts-container').appendChild(div);
+}
+
+function removePartRow(id) {
+  const el = document.getElementById(`part-row-${id}`);
+  if (el) el.remove();
+  if (!document.querySelectorAll('.part-row').length) {
+    const empty = document.getElementById('parts-empty');
+    if (empty) empty.style.display = '';
+  }
+}
+</script>
+{% endblock %}

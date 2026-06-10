@@ -1,0 +1,949 @@
+{% extends "base.html" %}
+{% block title %}All Files – QRTrack{% endblock %}
+{% block page_title %}All Files{% endblock %}
+{% block page_sub %}
+<span style="font-size:12px;color:var(--muted)">Interactive department network · click a node to expand</span>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+  /* ── View Toggle ── */
+  .view-toggle {
+    display: flex;
+    gap: 0;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    padding: 3px;
+    gap: 3px;
+  }
+  .toggle-btn {
+    padding: 7px 18px;
+    font-size: 12px;
+    font-weight: 600;
+    font-family: var(--mono);
+    border: none;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+    border-radius: 6px;
+    letter-spacing: 0.05em;
+    transition: all 0.18s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .toggle-btn.active {
+    background: var(--surface);
+    color: var(--accent);
+    box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+  }
+  .toggle-btn:hover:not(.active) { color: var(--text); }
+
+  /* ── Graph Wrapper ── */
+  #graph-view {
+    position: relative;
+  }
+  #graph-canvas {
+    width: 100%;
+    height: 72vh;
+    min-height: 520px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    position: relative;
+  }
+  #graph-svg {
+    width: 100%;
+    height: 100%;
+    cursor: grab;
+  }
+  #graph-svg:active { cursor: grabbing; }
+
+  /* SVG graph elements */
+  .dept-node circle {
+    filter: drop-shadow(0 0 12px rgba(0,212,255,0.35));
+    cursor: pointer;
+    transition: r 0.2s;
+  }
+  .dept-node circle:hover {
+    filter: drop-shadow(0 0 22px rgba(0,212,255,0.7));
+  }
+  .dept-node text {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    fill: #e2e8f0;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+  }
+  .dept-node .count-badge {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    fill: var(--muted-color, #64748b);
+    text-anchor: middle;
+    pointer-events: none;
+  }
+  .file-node circle {
+    cursor: pointer;
+    transition: filter 0.2s;
+  }
+  .file-node circle:hover {
+    filter: brightness(1.4) drop-shadow(0 0 8px currentColor);
+  }
+  .file-node text {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 10px;
+    fill: #94a3b8;
+    text-anchor: middle;
+    pointer-events: none;
+    user-select: none;
+  }
+  .graph-link {
+    stroke: rgba(31, 48, 68, 0.9);
+    stroke-width: 1.5;
+    fill: none;
+  }
+  .graph-link.dept-link {
+    stroke: rgba(0, 212, 255, 0.12);
+    stroke-width: 1;
+  }
+
+  /* ── Graph legend ── */
+  .graph-legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    pointer-events: none;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--muted);
+    background: rgba(10,15,30,0.7);
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    backdrop-filter: blur(6px);
+  }
+  .legend-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  /* ── Graph Controls ── */
+  .graph-controls {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .ctrl-btn {
+    width: 32px;
+    height: 32px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--muted);
+    font-size: 15px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .ctrl-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── Hint bar ── */
+  .graph-hint {
+    position: absolute;
+    top: 14px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 11px;
+    font-family: var(--mono);
+    color: var(--muted);
+    background: rgba(10,15,30,0.75);
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    backdrop-filter: blur(6px);
+    pointer-events: none;
+    white-space: nowrap;
+    letter-spacing: 0.04em;
+  }
+
+  /* ── File Detail Card ── */
+  #file-card {
+    display: none;
+    position: fixed;
+    z-index: 500;
+    width: 300px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.6), 0 0 0 1px rgba(0,212,255,0.08);
+    animation: cardIn 0.18s cubic-bezier(.4,0,.2,1);
+    overflow: hidden;
+  }
+  @keyframes cardIn {
+    from { opacity:0; transform: scale(0.92) translateY(6px); }
+    to   { opacity:1; transform: scale(1)    translateY(0); }
+  }
+  .card-accent-bar {
+    height: 3px;
+    width: 100%;
+  }
+  .card-body { padding: 16px 18px 18px; }
+  .card-file-id {
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 2px;
+  }
+  .card-file-name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+    margin-bottom: 14px;
+    line-height: 1.3;
+  }
+  .card-meta { display: flex; flex-direction: column; gap: 7px; margin-bottom: 16px; }
+  .card-row { display: flex; gap: 8px; align-items: center; font-size: 12px; }
+  .card-lbl { font-family: var(--mono); font-size: 10px; color: var(--muted); width: 72px; flex-shrink: 0; letter-spacing: 0.06em; }
+  .card-val { color: var(--text); }
+  .card-actions { display: flex; gap: 8px; }
+  .card-close {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 18px;
+    cursor: pointer;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  .card-close:hover { color: var(--text); }
+
+  /* ── Stats bar ── */
+  .graph-stats {
+    display: flex;
+    gap: 14px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+  .gstat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 18px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+  }
+  .gstat-num {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1;
+  }
+  .gstat-lbl { font-size: 11px; color: var(--muted); margin-top: 1px; }
+
+  /* ── Filter / Search Bar ── */
+  .filter-bar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .search-box { flex: 1; min-width: 200px; }
+  .priority-dot {
+    width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px;
+  }
+
+  /* ── Empty state for graph ── */
+  .graph-empty {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .graph-empty .icon { font-size: 48px; margin-bottom: 12px; opacity: 0.4; }
+  .graph-empty .msg  { font-size: 14px; font-family: var(--mono); opacity: 0.5; }
+
+  /* ── Pulse ring on dept nodes ── */
+  .pulse-ring {
+    animation: pulseRing 2.2s ease-out infinite;
+    transform-origin: center;
+    pointer-events: none;
+  }
+  @keyframes pulseRing {
+    0%   { r: 44px; opacity: 0.55; }
+    100% { r: 72px; opacity: 0; }
+  }
+
+  /* List view tweaks */
+  #list-view .filter-bar { margin-bottom: 20px; }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<!-- ── Stats Bar ── -->
+<div class="graph-stats" id="stats-bar">
+  <div class="gstat">
+    <div class="gstat-num" style="color:var(--accent)" id="stat-files">–</div>
+    <div><div class="gstat-lbl">Total Files</div></div>
+    <div style="font-size:22px;margin-left:4px">📁</div>
+  </div>
+  <div class="gstat">
+    <div class="gstat-num" style="color:#a78bfa" id="stat-depts">–</div>
+    <div><div class="gstat-lbl">Departments</div></div>
+    <div style="font-size:22px;margin-left:4px">🏢</div>
+  </div>
+  <div class="gstat">
+    <div class="gstat-num" style="color:var(--amber)" id="stat-out">–</div>
+    <div><div class="gstat-lbl">Checked Out</div></div>
+    <div style="font-size:22px;margin-left:4px">📤</div>
+  </div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:10px">
+    <!-- View Toggle -->
+    <div class="view-toggle">
+      <button class="toggle-btn active" id="btn-graph" onclick="setView('graph')">
+        <span>⬡</span> GRAPH
+      </button>
+      <button class="toggle-btn" id="btn-list" onclick="setView('list')">
+        <span>≡</span> LIST
+      </button>
+    </div>
+    <a href="/create" class="btn btn-primary btn-sm">➕ New File</a>
+  </div>
+</div>
+
+<!-- ══════════════ GRAPH VIEW ══════════════ -->
+<div id="graph-view">
+  <div id="graph-canvas">
+    <div class="graph-hint" id="graph-hint">Click a department node to expand its files</div>
+    <svg id="graph-svg"></svg>
+
+    <!-- Controls -->
+    <div class="graph-controls">
+      <button class="ctrl-btn" title="Zoom In"  onclick="zoomBy(1.3)">＋</button>
+      <button class="ctrl-btn" title="Zoom Out" onclick="zoomBy(0.77)">－</button>
+      <button class="ctrl-btn" title="Reset"    onclick="resetZoom()" style="font-size:12px">⟳</button>
+      <button class="ctrl-btn" title="Expand All" onclick="toggleAll()" id="expand-btn" style="font-size:11px;letter-spacing:-0.5px">ALL</button>
+    </div>
+
+    <!-- Legend -->
+    <div class="graph-legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#00d4ff"></div>Department</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div>Normal</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>High</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>Urgent</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>Confidential</div>
+    </div>
+
+    <div class="graph-empty" id="graph-empty" style="display:none">
+      <div class="icon">🕸️</div>
+      <div class="msg">No files registered yet</div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ LIST VIEW ══════════════ -->
+<div id="list-view" style="display:none">
+  <div class="filter-bar">
+    <div class="search-box">
+      <input type="text" id="search-input" placeholder="🔍 Search by ID, name, or department..."
+             oninput="filterFiles()" style="width:100%">
+    </div>
+    <select id="filter-priority" onchange="filterFiles()" style="width:160px">
+      <option value="">All Priorities</option>
+      <option value="urgent">Urgent</option>
+      <option value="high">High</option>
+      <option value="normal">Normal</option>
+      <option value="confidential">Confidential</option>
+    </select>
+  </div>
+
+  <div class="card">
+    <table id="files-table">
+      <thead>
+        <tr>
+          <th>FILE ID</th><th>NAME</th><th>DEPARTMENT</th><th>PRIORITY</th>
+          <th>LAST HANDLER</th><th>LAST ACTION</th><th>CREATED</th><th>ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in files %}
+        <tr data-priority="{{ f.get('priority','') }}"
+            data-search="{{ f.get('file_id','') }} {{ f.get('file_name','') }} {{ f.get('department','') }}">
+          <td><span style="font-family:var(--mono);font-size:12px;color:var(--accent)">{{ f.get('file_id','—') }}</span></td>
+          <td style="font-weight:500">{{ f.get('file_name','—') }}</td>
+          <td><span style="font-size:12px;color:var(--muted)">{{ f.get('department','—') }}</span></td>
+          <td>
+            {% set pr = f.get('priority','normal') %}
+            {% if pr == 'urgent' %}<span class="badge badge-red">🔴 Urgent</span>
+            {% elif pr == 'high' %}<span class="badge badge-amber">🟡 High</span>
+            {% elif pr == 'confidential' %}<span class="badge badge-purple">🔒 Confidential</span>
+            {% else %}<span class="badge badge-blue">Normal</span>{% endif %}
+          </td>
+          <td style="font-size:12px">{{ f.get('person','—') }}</td>
+          <td>
+            {% set act = f.get('action') %}
+            {% if act == 'checkin' %}<span class="badge badge-green">↙ In</span>
+            {% elif act == 'checkout' %}<span class="badge badge-amber">↗ Out</span>
+            {% elif act == 'transfer' %}<span class="badge badge-blue">⇄ Transfer</span>
+            {% elif act == 'created' %}<span class="badge badge-purple">✦ New</span>
+            {% else %}<span style="color:var(--muted)">—</span>{% endif %}
+          </td>
+          <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">{{ f.get('created_date','—') }}</td>
+          <td>
+            <div style="display:flex;gap:6px">
+              <a href="/file/{{ f.file_id }}/parts" class="btn btn-secondary btn-sm">📎 Parts</a>
+              <a href="/history" onclick="sessionStorage.setItem('hid','{{ f.file_id }}')" class="btn btn-secondary btn-sm">History</a>
+              <a href="/scan" class="btn btn-secondary btn-sm">Scan</a>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8" style="text-align:center;padding:40px;color:var(--muted)">
+          No files registered yet. <a href="/create" style="color:var(--accent)">Create one!</a>
+        </td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div id="no-results" style="display:none;text-align:center;padding:40px;color:var(--muted)">No files match your search.</div>
+  </div>
+</div>
+
+<!-- ── File Detail Card ── -->
+<div id="file-card">
+  <div class="card-accent-bar" id="card-accent-bar"></div>
+  <div class="card-body">
+    <button class="card-close" onclick="closeCard()">✕</button>
+    <div class="card-file-id" id="card-id"></div>
+    <div class="card-file-name" id="card-name"></div>
+    <div class="card-meta">
+      <div class="card-row"><span class="card-lbl">DEPT</span><span class="card-val" id="card-dept"></span></div>
+      <div class="card-row"><span class="card-lbl">PRIORITY</span><span id="card-priority"></span></div>
+      <div class="card-row"><span class="card-lbl">HANDLER</span><span class="card-val" id="card-person"></span></div>
+      <div class="card-row"><span class="card-lbl">STATUS</span><span id="card-action"></span></div>
+    </div>
+    <div class="card-actions">
+      <a id="card-btn-parts"   class="btn btn-secondary btn-sm" style="flex:1;text-align:center">📎 Parts</a>
+      <a id="card-btn-history" class="btn btn-secondary btn-sm" style="flex:1;text-align:center">🕐 History</a>
+      <a href="/scan"          class="btn btn-secondary btn-sm" style="flex:1;text-align:center">📷 Scan</a>
+    </div>
+  </div>
+</div>
+
+<!-- ── D3.js ── -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+
+<script>
+/* ────────────────── State ────────────────── */
+let graphData    = null;
+let simulation   = null;
+let svgEl, gEl, zoomBehavior;
+let expandedDepts = new Set();
+let allExpanded   = false;
+
+const PRIORITY_COLOR = {
+  normal:       '#00d4ff',
+  high:         '#f59e0b',
+  urgent:       '#ef4444',
+  confidential: '#a78bfa',
+};
+const ACTION_BADGE = {
+  checkin:  { label:'↙ In',       cls:'badge-green'  },
+  checkout: { label:'↗ Out',      cls:'badge-amber'  },
+  transfer: { label:'⇄ Transfer', cls:'badge-blue'   },
+  created:  { label:'✦ New',      cls:'badge-purple' },
+};
+
+/* ────────────────── View toggle ────────────────── */
+function setView(v) {
+  document.getElementById('graph-view').style.display = v === 'graph' ? '' : 'none';
+  document.getElementById('list-view' ).style.display = v === 'list'  ? '' : 'none';
+  document.getElementById('btn-graph').classList.toggle('active', v === 'graph');
+  document.getElementById('btn-list' ).classList.toggle('active', v === 'list');
+}
+
+/* ────────────────── List filter ────────────────── */
+function filterFiles() {
+  const q  = document.getElementById('search-input').value.toLowerCase();
+  const pr = document.getElementById('filter-priority').value;
+  let visible = 0;
+  document.querySelectorAll('#files-table tbody tr').forEach(row => {
+    if (!row.dataset) return;
+    const show = (!q || (row.dataset.search||'').toLowerCase().includes(q))
+              && (!pr || row.dataset.priority === pr);
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('no-results').style.display = visible === 0 ? 'block' : 'none';
+}
+
+/* ────────────────── Fetch graph data ────────────────── */
+async function loadGraph() {
+  try {
+    const res  = await fetch('/api/graph-data');
+    graphData  = await res.json();
+    updateStats(graphData);
+    buildGraph(graphData);
+  } catch(e) {
+    console.error('Graph load failed:', e);
+    document.getElementById('graph-empty').style.display = 'flex';
+  }
+}
+
+function updateStats(data) {
+  document.getElementById('stat-files').textContent = data.files.length;
+  document.getElementById('stat-depts').textContent = data.departments.length;
+  const out = data.files.filter(f => f.action === 'checkout').length;
+  document.getElementById('stat-out').textContent   = out;
+}
+
+/* ────────────────── Build D3 Graph ────────────────── */
+function buildGraph(data) {
+  if (!data.departments.length) {
+    document.getElementById('graph-empty').style.display = 'flex';
+    return;
+  }
+
+  const canvas = document.getElementById('graph-canvas');
+  const W = canvas.clientWidth  || 900;
+  const H = canvas.clientHeight || 600;
+
+  svgEl = d3.select('#graph-svg')
+    .attr('width', W)
+    .attr('height', H);
+
+  svgEl.selectAll('*').remove();
+
+  /* Defs: radial gradient & glow filter */
+  const defs = svgEl.append('defs');
+
+  // Glow filter
+  const filt = defs.append('filter').attr('id','glow').attr('x','-50%').attr('y','-50%').attr('width','200%').attr('height','200%');
+  filt.append('feGaussianBlur').attr('stdDeviation','4').attr('result','coloredBlur');
+  const fm = filt.append('feMerge');
+  fm.append('feMergeNode').attr('in','coloredBlur');
+  fm.append('feMergeNode').attr('in','SourceGraphic');
+
+  // Glow filter (strong, for dept)
+  const filt2 = defs.append('filter').attr('id','glow-strong').attr('x','-80%').attr('y','-80%').attr('width','260%').attr('height','260%');
+  filt2.append('feGaussianBlur').attr('stdDeviation','8').attr('result','coloredBlur');
+  const fm2 = filt2.append('feMerge');
+  fm2.append('feMergeNode').attr('in','coloredBlur');
+  fm2.append('feMergeNode').attr('in','SourceGraphic');
+
+  // dept gradient
+  data.departments.forEach((dept, i) => {
+    const hue = (i * 360 / data.departments.length);
+    const grad = defs.append('radialGradient')
+      .attr('id', `dg-${i}`)
+      .attr('cx', '35%').attr('cy', '30%');
+    grad.append('stop').attr('offset','0%').attr('stop-color','#1e3a5a');
+    grad.append('stop').attr('offset','100%').attr('stop-color','#0a1628');
+  });
+
+  /* Zoom */
+  zoomBehavior = d3.zoom()
+    .scaleExtent([0.2, 3])
+    .on('zoom', e => gEl.attr('transform', e.transform));
+
+  svgEl.call(zoomBehavior);
+
+  gEl = svgEl.append('g');
+
+  // Layers
+  const linkLayer = gEl.append('g').attr('class','link-layer');
+  const nodeLayer = gEl.append('g').attr('class','node-layer');
+
+  /* Initial nodes: departments only */
+  let nodes = data.departments.map((d, i) => ({
+    ...d,
+    type: 'dept',
+    nodeId: `dept::${d.name}`,
+    x: W/2 + Math.cos(i * 2*Math.PI / data.departments.length) * (Math.min(W,H) * 0.28),
+    y: H/2 + Math.sin(i * 2*Math.PI / data.departments.length) * (Math.min(W,H) * 0.28),
+  }));
+  let links = [];
+
+  /* Simulation */
+  simulation = d3.forceSimulation(nodes)
+    .force('charge', d3.forceManyBody().strength(d => d.type === 'dept' ? -380 : -90))
+    .force('center',    d3.forceCenter(W/2, H/2).strength(0.04))
+    .force('collision', d3.forceCollide().radius(d => d.type === 'dept' ? 68 : 36).strength(0.85))
+    .force('link', d3.forceLink(links).id(d => d.nodeId)
+      .distance(d => d.source.type === 'dept' && d.target.type === 'dept' ? 240 :
+                     d.source.type === 'dept' ? 110 : 80)
+      .strength(0.35))
+    .alphaDecay(0.025)
+    .on('tick', ticked);
+
+  render();
+
+  /* ── Render function ── */
+  function render() {
+    /* Links */
+    const linkSel = linkLayer.selectAll('.graph-link')
+      .data(links, d => `${d.source.nodeId || d.source}__${d.target.nodeId || d.target}`);
+
+    linkSel.enter().append('line')
+      .attr('class', d => `graph-link ${d.type === 'dept' ? 'dept-link' : ''}`)
+      .style('opacity', 0)
+      .transition().duration(350)
+        .style('opacity', 1);
+
+    linkSel.exit()
+      .transition().duration(250).style('opacity', 0).remove();
+
+    /* Nodes */
+    const nodeSel = nodeLayer.selectAll('.graph-node')
+      .data(nodes, d => d.nodeId);
+
+    const nodeEnter = nodeSel.enter().append('g')
+      .attr('class', d => `graph-node ${d.type}-node`)
+      .attr('transform', d => `translate(${d.x ?? W/2},${d.y ?? H/2})`)
+      .style('opacity', 0)
+      .call(d3.drag()
+        .on('start', dragStart)
+        .on('drag',  dragged)
+        .on('end',   dragEnd));
+
+    /* Department node */
+    const deptEnter = nodeEnter.filter(d => d.type === 'dept');
+
+    // Outer pulse ring
+    deptEnter.append('circle')
+      .attr('class', 'pulse-ring')
+      .attr('r', 44)
+      .attr('fill', 'none')
+      .attr('stroke', '#00d4ff')
+      .attr('stroke-width', 1)
+      .attr('opacity', 0.3);
+
+    // Main circle
+    deptEnter.append('circle')
+      .attr('r', 40)
+      .attr('fill', '#0d1f35')
+      .attr('stroke', '#00d4ff')
+      .attr('stroke-width', 2)
+      .style('filter', 'url(#glow-strong)')
+      .on('click', (event, d) => { event.stopPropagation(); toggleDept(d); })
+      .on('mouseover', function(){ d3.select(this).attr('stroke-width', 3); })
+      .on('mouseout',  function(event, d){
+        const expanded = expandedDepts.has(d.name);
+        d3.select(this).attr('stroke-width', expanded ? 2.5 : 2);
+      });
+
+    // Icon
+    deptEnter.append('text')
+      .attr('y', -8)
+      .attr('text-anchor', 'middle')
+      .attr('font-size', 18)
+      .attr('fill', '#00d4ff')
+      .attr('pointer-events', 'none')
+      .text('🏢');
+
+    // Label (split long names)
+    deptEnter.each(function(d) {
+      const words = d.name.split(' ');
+      const g = d3.select(this);
+      if (words.length <= 2) {
+        g.append('text').attr('y', 14).attr('text-anchor','middle')
+          .attr('font-family','Space Mono, monospace').attr('font-size', 9)
+          .attr('fill','#94a3b8').attr('pointer-events','none')
+          .text(d.name.length > 14 ? d.name.substring(0,13)+'…' : d.name);
+      } else {
+        const line1 = words.slice(0, Math.ceil(words.length/2)).join(' ');
+        const line2 = words.slice(Math.ceil(words.length/2)).join(' ');
+        g.append('text').attr('y', 12).attr('text-anchor','middle')
+          .attr('font-family','Space Mono, monospace').attr('font-size', 8.5)
+          .attr('fill','#94a3b8').attr('pointer-events','none')
+          .text(line1.length > 13 ? line1.substring(0,12)+'…' : line1);
+        g.append('text').attr('y', 23).attr('text-anchor','middle')
+          .attr('font-family','Space Mono, monospace').attr('font-size', 8.5)
+          .attr('fill','#64748b').attr('pointer-events','none')
+          .text(line2.length > 13 ? line2.substring(0,12)+'…' : line2);
+      }
+    });
+
+    // Count badge
+    deptEnter.append('text')
+      .attr('class', 'count-badge')
+      .attr('y', -22)
+      .attr('text-anchor', 'middle')
+      .attr('font-family', 'Space Mono, monospace')
+      .attr('font-size', 9)
+      .attr('fill', '#64748b')
+      .attr('pointer-events', 'none')
+      .text(d => `${d.file_count} file${d.file_count !== 1 ? 's' : ''}`);
+
+    /* File node */
+    const fileEnter = nodeEnter.filter(d => d.type === 'file');
+
+    fileEnter.append('circle')
+      .attr('r', 18)
+      .attr('fill', d => hexFill(PRIORITY_COLOR[d.priority] || '#00d4ff'))
+      .attr('stroke', d => PRIORITY_COLOR[d.priority] || '#00d4ff')
+      .attr('stroke-width', 1.5)
+      .style('filter', 'url(#glow)')
+      .on('click', (event, d) => { event.stopPropagation(); showFileCard(event, d); })
+      .on('mouseover', function(){ d3.select(this).attr('r', 21); })
+      .on('mouseout',  function(){ d3.select(this).attr('r', 18); });
+
+    fileEnter.append('text')
+      .attr('y', 4).attr('text-anchor', 'middle')
+      .attr('font-size', 10).attr('fill', 'rgba(255,255,255,0.9)')
+      .attr('pointer-events', 'none')
+      .text(d => d.id.length > 8 ? d.id.substring(0,7)+'…' : d.id);
+
+    // File label below circle
+    fileEnter.append('text')
+      .attr('y', 30).attr('text-anchor', 'middle')
+      .attr('font-family', 'DM Sans, sans-serif')
+      .attr('font-size', 9).attr('fill', '#64748b')
+      .attr('pointer-events', 'none')
+      .text(d => d.name.length > 14 ? d.name.substring(0,13)+'…' : d.name);
+
+    /* Animate in */
+    nodeEnter.transition().duration(400).style('opacity', 1);
+
+    nodeSel.exit()
+      .transition().duration(280).style('opacity', 0).remove();
+  }
+
+  function ticked() {
+    gEl.selectAll('.graph-link')
+      .attr('x1', d => (d.source.x ?? 0))
+      .attr('y1', d => (d.source.y ?? 0))
+      .attr('x2', d => (d.target.x ?? 0))
+      .attr('y2', d => (d.target.y ?? 0));
+
+    gEl.selectAll('.graph-node')
+      .attr('transform', d => `translate(${d.x ?? 0},${d.y ?? 0})`);
+  }
+
+  /* ── Toggle department expand/collapse ── */
+  function toggleDept(deptNode) {
+    const name = deptNode.name;
+
+    if (expandedDepts.has(name)) {
+      // Collapse: remove file nodes + links for this dept
+      expandedDepts.delete(name);
+      nodes = nodes.filter(n => !(n.type === 'file' && n.department === name));
+      links = links.filter(l => {
+        const sid = l.source.nodeId || l.source;
+        const tid = l.target.nodeId || l.target;
+        return !(sid === `dept::${name}` || tid === `dept::${name}` && nodes.find(n=>n.nodeId===tid)?.type==='file');
+      });
+      // Remove only file links for this dept
+      links = links.filter(l => {
+        const s = typeof l.source === 'object' ? l.source : nodes.find(n=>n.nodeId===l.source);
+        const t = typeof l.target === 'object' ? l.target : nodes.find(n=>n.nodeId===l.target);
+        if (!s || !t) return false;
+        if (s.type==='dept' && s.name===name && t.type==='file') return false;
+        if (t.type==='dept' && t.name===name && s.type==='file') return false;
+        return true;
+      });
+      updateDeptRing(deptNode, false);
+    } else {
+      // Expand: add file nodes for this dept
+      expandedDepts.add(name);
+      const deptFiles = data.files.filter(f => f.department === name);
+      const newNodes  = deptFiles.map(f => ({
+        ...f,
+        type:   'file',
+        nodeId: `file::${f.id}`,
+        x: deptNode.x + (Math.random()-0.5)*80,
+        y: deptNode.y + (Math.random()-0.5)*80,
+      }));
+      nodes = [...nodes, ...newNodes];
+      const newLinks = newNodes.map(fn => ({
+        source: deptNode.nodeId,
+        target: fn.nodeId,
+        type:   'file-link',
+      }));
+      links = [...links, ...newLinks];
+      updateDeptRing(deptNode, true);
+    }
+
+    simulation.nodes(nodes);
+    simulation.force('link').links(links);
+    simulation.alpha(0.5).restart();
+    render();
+  }
+
+  function updateDeptRing(deptNode, expanded) {
+    gEl.selectAll('.dept-node')
+      .filter(d => d.name === deptNode.name)
+      .select('circle:nth-child(2)')
+      .attr('stroke', expanded ? '#00ffaa' : '#00d4ff')
+      .attr('stroke-width', expanded ? 2.5 : 2);
+  }
+
+  /* ── Toggle ALL ── */
+  window.toggleAll = function() {
+    if (allExpanded) {
+      // Collapse all
+      expandedDepts.clear();
+      nodes = nodes.filter(n => n.type === 'dept');
+      links = [];
+      allExpanded = false;
+      document.getElementById('expand-btn').textContent = 'ALL';
+    } else {
+      // Expand all departments
+      data.departments.forEach(dept => {
+        if (!expandedDepts.has(dept.name)) {
+          expandedDepts.add(dept.name);
+          const dn = nodes.find(n => n.nodeId === `dept::${dept.name}`);
+          if (!dn) return;
+          const deptFiles = data.files.filter(f => f.department === dept.name);
+          const newNodes  = deptFiles.map(f => ({
+            ...f, type:'file', nodeId:`file::${f.id}`,
+            x: dn.x + (Math.random()-0.5)*80,
+            y: dn.y + (Math.random()-0.5)*80,
+          }));
+          nodes = [...nodes, ...newNodes];
+          links = [...links, ...newNodes.map(fn => ({
+            source: dn.nodeId, target: fn.nodeId, type:'file-link'
+          }))];
+        }
+      });
+      allExpanded = true;
+      document.getElementById('expand-btn').textContent = 'CLOSE';
+    }
+    simulation.nodes(nodes);
+    simulation.force('link').links(links);
+    simulation.alpha(0.6).restart();
+    render();
+  };
+
+  /* ── Drag handlers ── */
+  function dragStart(event, d) {
+    if (!event.active) simulation.alphaTarget(0.3).restart();
+    d.fx = d.x; d.fy = d.y;
+  }
+  function dragged(event, d)  { d.fx = event.x; d.fy = event.y; }
+  function dragEnd(event, d)  {
+    if (!event.active) simulation.alphaTarget(0);
+    d.fx = null; d.fy = null;
+  }
+
+  /* ── Close card on SVG background click ── */
+  svgEl.on('click', closeCard);
+
+  /* Initial tick */
+  simulation.alpha(0.8).restart();
+}
+
+/* ── File detail card ── */
+function showFileCard(event, d) {
+  closeCard();
+  const card = document.getElementById('file-card');
+  document.getElementById('card-id').textContent   = d.id;
+  document.getElementById('card-name').textContent = d.name;
+  document.getElementById('card-dept').textContent = d.department;
+  document.getElementById('card-person').textContent = d.person || '—';
+
+  const prColor = PRIORITY_COLOR[d.priority] || '#00d4ff';
+  document.getElementById('card-accent-bar').style.background = prColor;
+
+  const prLabels = { normal:'Normal', high:'🟡 High', urgent:'🔴 Urgent', confidential:'🔒 Confidential' };
+  const prCls    = { normal:'badge-blue', high:'badge-amber', urgent:'badge-red', confidential:'badge-purple' };
+  document.getElementById('card-priority').innerHTML =
+    `<span class="badge ${prCls[d.priority]||'badge-blue'}">${prLabels[d.priority]||'Normal'}</span>`;
+
+  const ab = ACTION_BADGE[d.action] || { label: '—', cls: '' };
+  document.getElementById('card-action').innerHTML =
+    d.action ? `<span class="badge ${ab.cls}">${ab.label}</span>` : '<span style="color:var(--muted)">—</span>';
+
+  document.getElementById('card-btn-parts').href   = `/file/${d.id}/parts`;
+  document.getElementById('card-btn-history').href = `/history`;
+  document.getElementById('card-btn-history').onclick = () => sessionStorage.setItem('hid', d.id);
+
+  // Position near cursor, keep in viewport
+  const vw = window.innerWidth, vh = window.innerHeight;
+  let cx = event.clientX + 16, cy = event.clientY - 20;
+  if (cx + 310 > vw) cx = event.clientX - 326;
+  if (cy + 280 > vh) cy = vh - 290;
+  card.style.left    = cx + 'px';
+  card.style.top     = cy + 'px';
+  card.style.display = 'block';
+}
+
+function closeCard() {
+  document.getElementById('file-card').style.display = 'none';
+}
+
+/* ── Zoom helpers ── */
+function zoomBy(factor) {
+  svgEl && svgEl.transition().duration(280).call(zoomBehavior.scaleBy, factor);
+}
+function resetZoom() {
+  const canvas = document.getElementById('graph-canvas');
+  svgEl && svgEl.transition().duration(350)
+    .call(zoomBehavior.transform, d3.zoomIdentity
+      .translate(canvas.clientWidth/2, canvas.clientHeight/2)
+      .scale(1)
+      .translate(-canvas.clientWidth/2, -canvas.clientHeight/2));
+}
+
+/* ── Helper: darker fill for file nodes ── */
+function hexFill(hex) {
+  // Returns a dark tinted version for the circle fill
+  const m = hex.match(/^#([0-9a-f]{6})$/i);
+  if (!m) return '#0d1f35';
+  const r = parseInt(m[1].substr(0,2),16)*0.12|0;
+  const g = parseInt(m[1].substr(2,2),16)*0.12|0;
+  const b = parseInt(m[1].substr(4,2),16)*0.15|0;
+  return `rgb(${r},${g},${b})`;
+}
+
+/* ── Resize ── */
+window.addEventListener('resize', () => {
+  if (!svgEl) return;
+  const canvas = document.getElementById('graph-canvas');
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  svgEl.attr('width', W).attr('height', H);
+  simulation && simulation.force('center', d3.forceCenter(W/2, H/2)).alpha(0.2).restart();
+});
+
+/* ── Boot ── */
+document.addEventListener('DOMContentLoaded', () => {
+  loadGraph();
+  // Auto-restore history search
+  const hid = sessionStorage.getItem('hid');
+  if (hid) { sessionStorage.removeItem('hid'); }
+});
+</script>
+{% endblock %}

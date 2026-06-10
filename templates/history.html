@@ -1,0 +1,238 @@
+{% extends "base.html" %}
+{% block title %}History – QRTrack{% endblock %}
+{% block page_title %}File History{% endblock %}
+{% block page_sub %}<span style="font-size:12px;color:var(--muted)">Complete audit trail for any file</span>{% endblock %}
+
+{% block content %}
+
+<div class="card" style="margin-bottom:20px">
+  <form method="POST" style="display:flex;gap:12px;align-items:flex-end">
+    <div class="form-group" style="flex:1;margin-bottom:0">
+      <label>ENTER FILE ID TO SEARCH</label>
+      <input type="text" name="file_id" placeholder="e.g. CSE-2024-001"
+             value="{{ searched_id }}"
+             style="font-family:var(--mono);text-transform:uppercase">
+    </div>
+    <button type="submit" class="btn btn-primary">Search →</button>
+  </form>
+</div>
+
+{% if file_info %}
+
+<div style="display:grid;grid-template-columns:1fr 2fr;gap:20px">
+
+  <!-- Left: file detail card + QR -->
+  <div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-title" style="margin-bottom:16px">📁 File Details</div>
+      <div style="display:flex;flex-direction:column;gap:12px;font-size:13px">
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">FILE ID</div>
+          <div style="font-family:var(--mono);font-weight:700;font-size:16px;color:var(--accent)">
+            {{ file_info.get('file_id','—') }}
+          </div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">FILE NAME</div>
+          <div style="font-weight:600">{{ file_info.get('file_name','—') }}</div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">DEPARTMENT</div>
+          <div>{{ file_info.get('department','—') }}</div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">PRIORITY</div>
+          {% if file_info.get('priority') == 'urgent' %}
+            <span class="badge badge-red">🔴 Urgent</span>
+          {% elif file_info.get('priority') == 'high' %}
+            <span class="badge badge-amber">🟡 High</span>
+          {% elif file_info.get('priority') == 'confidential' %}
+            <span class="badge badge-purple">🔒 Confidential</span>
+          {% else %}
+            <span class="badge badge-blue">Normal</span>
+          {% endif %}
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">STAGE</div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+            {% set stage = file_info.get('stage','created') %}
+            <span class="badge {% if stage == 'created' %}badge-purple{% else %}badge-blue{% endif %}">Created</span>
+            <span style="color:var(--muted)">→</span>
+            <span class="badge {% if stage == 'review' %}badge-amber{% else %}badge-blue{% endif %}">Review</span>
+            <span style="color:var(--muted)">→</span>
+            <span class="badge {% if stage == 'approved' %}badge-green{% else %}badge-blue{% endif %}">Approved</span>
+            <span style="color:var(--muted)">→</span>
+            <span class="badge {% if stage == 'closed' %}badge-red{% else %}badge-blue{% endif %}">Closed</span>
+          </div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">CREATED</div>
+          <div style="font-size:12px">{{ file_info.get('created_date','') }}</div>
+        </div>
+
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">DUE DATE</div>
+          <div>{{ file_info.get('due_date') or '—' }}</div>
+        </div>
+
+        {% if file_info.get('description') %}
+        <div>
+          <div style="font-family:var(--mono);font-size:10px;color:var(--muted);margin-bottom:3px">DESCRIPTION</div>
+          <div style="font-size:12px;color:var(--muted)">{{ file_info.get('description') }}</div>
+        </div>
+        {% endif %}
+
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:8px">QR Code</div>
+      <div style="text-align:center">
+        <div style="background:#fff;display:inline-block;padding:12px;border-radius:8px">
+          {% if file_info.get('qr_base64') %}
+            <img src="{{ file_info['qr_base64'] }}" alt="QR"
+                 style="width:140px;height:140px;display:block">
+          {% else %}
+            <div style="width:140px;height:140px;display:flex;align-items:center;
+                        justify-content:center;color:#999;font-size:12px">QR not found</div>
+          {% endif %}
+        </div>
+        <div style="margin-top:10px">
+          {% if file_info.get('qr_base64') %}
+            <a href="{{ file_info['qr_base64'] }}" download="{{ file_info.get('file_id') }}.png"
+               class="btn btn-secondary btn-sm">⬇ Download</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: timeline -->
+  <div class="card">
+    <div class="card-header">
+      <div class="card-title">Movement History</div>
+      <div class="card-sub">{{ records|length if records else 0 }} records found</div>
+    </div>
+
+    {% if records %}
+    <div style="position:relative;padding-left:28px">
+      <div style="position:absolute;left:8px;top:0;bottom:0;width:2px;background:var(--border)"></div>
+
+      {% set dot_colors = {'checkin': 'var(--green)', 'checkout': 'var(--amber)', 'transfer': 'var(--accent)'} %}
+
+      {% for r in records %}
+      <div style="position:relative;margin-bottom:20px">
+
+        <div style="position:absolute;left:-24px;top:3px;width:12px;height:12px;border-radius:50%;background:{{ dot_colors.get(r.get('action'), '#a78bfa') }}"></div>
+
+        <div style="background:var(--surface2);border-radius:10px;padding:14px">
+
+          <!-- Action badge + timestamp -->
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            {% if r.get('action') == 'checkin' %}
+              <span class="badge badge-green">↙ Check In</span>
+            {% elif r.get('action') == 'checkout' %}
+              <span class="badge badge-amber">↗ Check Out</span>
+            {% elif r.get('action') == 'transfer' %}
+              <span class="badge badge-blue">⇄ Transfer</span>
+            {% else %}
+              <span class="badge badge-purple">✦ Created</span>
+            {% endif %}
+            <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">
+              {{ r.get('in_time','') or '—' }}
+            </span>
+          </div>
+
+          <!-- Details grid -->
+          <div style="display:flex;gap:20px;font-size:12px;flex-wrap:wrap">
+
+            <div>
+              <span style="color:var(--muted)">By: </span>
+              <strong>{{ r.get('person','—') }}</strong>
+            </div>
+
+            {% if r.get('receiver') %}
+              {% if r.get('action') == 'checkout' %}
+              <div style="background:rgba(245,158,11,0.1);padding:2px 10px;border-radius:20px;border:1px solid rgba(245,158,11,0.3)">
+                <span style="color:var(--muted)">Taken by: </span>
+                <strong style="color:var(--amber)">{{ r.get('receiver') }}</strong>
+              </div>
+              {% elif r.get('action') == 'transfer' %}
+              <div style="background:rgba(0,212,255,0.1);padding:2px 10px;border-radius:20px;border:1px solid rgba(0,212,255,0.2)">
+                <span style="color:var(--muted)">Received by: </span>
+                <strong style="color:var(--accent)">{{ r.get('receiver') }}</strong>
+              </div>
+              {% elif r.get('action') == 'checkin' %}
+              <div style="background:rgba(16,185,129,0.1);padding:2px 10px;border-radius:20px;border:1px solid rgba(16,185,129,0.2)">
+                <span style="color:var(--muted)">Received by: </span>
+                <strong style="color:var(--green)">{{ r.get('receiver') }}</strong>
+              </div>
+              {% endif %}
+            {% endif %}
+
+            <div>
+              <span style="color:var(--muted)">Dept: </span>
+              {{ r.get('department','—') }}
+            </div>
+
+            {% if r.get('out_time') %}
+            <div>
+              <span style="color:var(--muted)">Out: </span>
+              {{ r.get('out_time') }}
+            </div>
+            {% endif %}
+
+            {% if r.get('due_date') %}
+            <div>
+              <span style="color:var(--muted)">Due: </span>
+              <span style="color:var(--amber)">{{ r.get('due_date') }}</span>
+            </div>
+            {% endif %}
+
+          </div>
+
+          {% if r.get('notes') %}
+          <div style="margin-top:6px;font-size:11px;color:var(--muted);font-style:italic">
+            📝 {{ r.get('notes') }}
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+      {% endfor %}
+
+    </div>
+    {% else %}
+    <div style="text-align:center;padding:40px;color:var(--muted)">
+      No movement records found.
+    </div>
+    {% endif %}
+
+  </div>
+
+</div>
+
+{% elif searched_id %}
+<div class="card" style="text-align:center;padding:60px">
+  <div style="font-size:48px">🔍</div>
+  <div style="font-size:16px;margin-top:12px">
+    File "<strong style="color:var(--accent)">{{ searched_id }}</strong>" not found
+  </div>
+  <div style="color:var(--muted);font-size:13px;margin-top:6px">Check the File ID and try again</div>
+</div>
+{% else %}
+<div class="card" style="text-align:center;padding:60px;color:var(--muted)">
+  <div style="font-size:48px">🕐</div>
+  <div style="font-size:15px;margin-top:12px">
+    Enter a File ID above to view its complete movement history
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}
