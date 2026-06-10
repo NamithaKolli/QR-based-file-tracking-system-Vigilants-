@@ -16,7 +16,7 @@ The system allows staff to create files, generate QR codes, scan them during tra
 - File Creation with QR Code
   - Generates QR codes for every file (stored as base64 — no filesystem required)
   - Unique file IDs for tracking
-  - File priority levels: Normal, High, Urgent
+  - File priority levels: Low,Normal, High,Urgent
   - Optional description and due date at creation
   - Add document sub-parts (e.g. invoices, memos, reports) at creation time
 
@@ -298,8 +298,8 @@ Emails are sent asynchronously and will fail silently if not configured.
 
 # Contributors
 
-- Namitha Sai Kolli
 - Gogineni Gouthami
+- Namitha Sai Kolli
 - Surapaneni Aasritha Sri Varshini
 - Ravipati Vishnu Tejaswini
 - Jeevani Yalamanchilli
@@ -315,10 +315,8 @@ This project is intended for educational and academic purposes.
 
 # Future Improvements
 
-- Time-based push notifications
-- Priority order for urgent files
 - Automated file approval workflows
-- Deployment to cloud servers (Render / Railway)
+- Re-Deployment to cloud servers (Render / Railway) with paid plan
 - Mobile-friendly interface
 - Search and filter on the files page
 - File archiving and soft-delete
